@@ -1,0 +1,3 @@
+cliopts="--log-level trace"
+stderr="/persist/log/containerd.log"
+
