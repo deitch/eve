@@ -142,12 +142,6 @@ func (pes *PatchEnvelopes) updateState() {
 						}
 					}
 
-					// If controller forces us to store patch envelope and don't expose it
-					// to appInstance we keep it that way
-					if pe.State == types.PatchEnvelopeStateReady && peState == types.PatchEnvelopeStateActive {
-						peState = types.PatchEnvelopeStateReady
-					}
-
 					if len(pe.Errors) > 0 {
 						peState = types.PatchEnvelopeStateError
 					}
@@ -199,10 +193,6 @@ func (pes *PatchEnvelopes) unpublishPatchEnvelopeInfo(peInfo *types.PatchEnvelop
 func (pes *PatchEnvelopes) Get(appUUID string) types.PatchEnvelopeInfoList {
 	var res []types.PatchEnvelopeInfo
 	pes.currentState.Range(func(patchEnvelopeUUID uuid.UUID, envelope types.PatchEnvelopeInfo) bool {
-		// We don't want to expose patch envelopes which are not activated to app instance
-		if envelope.State != types.PatchEnvelopeStateActive {
-			return true
-		}
 		for _, allowedUUID := range envelope.AllowedApps {
 			if allowedUUID == appUUID {
 				res = append(res, envelope)
@@ -366,7 +356,6 @@ func (pes *PatchEnvelopes) EnvelopesInUsage() []string {
 // disappear on zedrouter
 type peInfoToDisplay struct {
 	PatchID     string
-	Version     string
 	BinaryBlobs []types.BinaryBlobCompleted
 	VolumeRefs  []types.BinaryBlobVolumeRef
 }
@@ -392,7 +381,6 @@ func patchEnvelopesJSONForAppInstance(pe types.PatchEnvelopeInfoList) ([]byte, e
 
 		toDisplay[i] = peInfoToDisplay{
 			PatchID:     envelope.PatchID,
-			Version:     envelope.Version,
 			BinaryBlobs: binaryBlobs,
 			VolumeRefs:  envelope.VolumeRefs,
 		}

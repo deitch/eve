@@ -52,7 +52,6 @@ func (z *zedrouter) handleGlobalConfigImpl(ctxArg interface{}, key string,
 			z.metricInterval = metricInterval
 		}
 		z.enableArpSnooping = gcp.GlobalValueBool(types.EnableARPSnoop)
-		z.localLegacyMACAddr = gcp.GlobalValueBool(types.NetworkLocalLegacyMACAddress)
 		z.niReconciler.ApplyUpdatedGCP(z.runCtx, *gcp)
 	}
 	z.log.Functionf("handleGlobalConfigImpl done for %s", key)
@@ -117,10 +116,6 @@ func (z *zedrouter) handleDNSImpl(ctxArg interface{}, key string,
 		niConfig := z.lookupNetworkInstanceConfig(key)
 		if niConfig == nil {
 			z.log.Errorf("handleDNSImpl: failed to get config for NI %s", niStatus.UUID)
-			continue
-		}
-		if niStatus.HasError() && !niStatus.WaitingForUplink {
-			// Skip NI if it is in a failed state and the error is not about missing uplink.
 			continue
 		}
 		z.doUpdateNIUplink(niStatus.SelectedUplinkLogicalLabel, &niStatus, *niConfig)
@@ -474,30 +469,6 @@ func (z *zedrouter) handleAppNetworkCreate(ctxArg interface{}, key string,
 		return
 	}
 	status.AppNum = appNum
-
-	// For app already deployed (before node reboot), keep using the same MAC address
-	// generator. Changing MAC addresses could break network config inside the app.
-	macGenerator, _, err := z.appMACGeneratorMap.Get(appNumKey)
-	if err != nil || macGenerator == types.MACGeneratorUnspecified {
-		// New app or an existing app but without MAC generator ID persisted.
-		if z.localLegacyMACAddr {
-			// Use older node-scoped MAC address generator.
-			macGenerator = types.MACGeneratorNodeScoped
-		} else {
-			// Use newer (and preferred) globally-scoped MAC address generator.
-			macGenerator = types.MACGeneratorGloballyScoped
-		}
-		// Remember which MAC generator is being used for this app.
-		err = z.appMACGeneratorMap.Assign(appNumKey, macGenerator, false)
-		if err != nil {
-			err = fmt.Errorf("failed to persist MAC generator ID for app %s/%s: %v",
-				config.UUIDandVersion.UUID, config.DisplayName, err)
-			z.log.Errorf("handleAppNetworkCreate(%v): %v", config.UUIDandVersion.UUID, err)
-			z.addAppNetworkError(&status, "handleAppNetworkCreate", err)
-			return
-		}
-	}
-	status.MACGenerator = macGenerator
 	z.publishAppNetworkStatus(&status)
 
 	// Allocate application numbers on network instances.
@@ -532,7 +503,7 @@ func (z *zedrouter) handleAppNetworkCreate(ctxArg interface{}, key string,
 }
 
 // handleAppNetworkModify cannot handle any change.
-// For example, the number of AppNetAdapters can not be changed.
+// For example, the number of AppNetAdapters networks can not be changed.
 func (z *zedrouter) handleAppNetworkModify(ctxArg interface{}, key string,
 	configArg interface{}, oldConfigArg interface{}) {
 	newConfig := configArg.(types.AppNetworkConfig)
@@ -622,12 +593,6 @@ func (z *zedrouter) handleAppNetworkDelete(ctxArg interface{}, key string,
 	err := z.appNumAllocator.Free(appNumKey, false)
 	if err != nil {
 		z.log.Errorf("failed to free number allocated to app %s/%s: %v",
-			status.UUIDandVersion.UUID, status.DisplayName, err)
-		// Continue anyway...
-	}
-	err = z.appMACGeneratorMap.Delete(appNumKey, false)
-	if err != nil {
-		z.log.Errorf("failed to delete persisted MAC generator ID for app %s/%s: %v",
 			status.UUIDandVersion.UUID, status.DisplayName, err)
 		// Continue anyway...
 	}

@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/lf-edge/eve/pkg/pillar/hypervisor"
 	"os"
 	"sort"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/lf-edge/eve/pkg/pillar/agentlog"
 	"github.com/lf-edge/eve/pkg/pillar/base"
 	"github.com/lf-edge/eve/pkg/pillar/flextimer"
+	"github.com/lf-edge/eve/pkg/pillar/hypervisor"
 	"github.com/lf-edge/eve/pkg/pillar/objtonum"
 	"github.com/lf-edge/eve/pkg/pillar/pidfile"
 	"github.com/lf-edge/eve/pkg/pillar/pubsub"
@@ -74,6 +74,8 @@ type zedmanagerContext struct {
 	// hypervisorPtr is the name of the hypervisor to use
 	hypervisorPtr      *string
 	assignableAdapters *types.AssignableAdapters
+	// hvType
+	hvTypeKube bool
 }
 
 // AddAgentSpecificCLIFlags adds CLI options
@@ -93,6 +95,7 @@ func Run(ps *pubsub.PubSub, loggerArg *logrus.Logger, logArg *base.LogObject, ar
 	// Any state needed by handler functions
 	ctx := zedmanagerContext{
 		globalConfig: types.DefaultConfigItemValueMap(),
+		hvTypeKube:   base.IsHVTypeKube(),
 	}
 	agentbase.Init(&ctx, logger, log, agentName,
 		agentbase.WithArguments(arguments))

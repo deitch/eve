@@ -124,7 +124,6 @@ func handleDeferredVolumeCreate(ctx *volumemgrContext, key string, config *types
 		State:                   types.INITIAL,
 	}
 	updateVolumeStatusRefCount(ctx, status)
-	log.Noticef("handleDeferredVolumeCreate(%s) setting contentFormat to %s", key, volumeFormat[status.Key()])
 	status.ContentFormat = volumeFormat[status.Key()]
 
 	created, err := volumehandlers.GetVolumeHandler(log, ctx, status).Populate()
@@ -152,9 +151,6 @@ func handleDeferredVolumeCreate(ctx *volumemgrContext, key string, config *types
 			}
 			// XXX this is not the same as what we downloaded
 			// and created but the best we know
-			if (status.TotalSize != 0) && (status.TotalSize != int64(actualSize)) {
-				log.Warnf("handleDeferredVolumeCreate(%s) from ds set status.TotalSize %d, was %d", key, actualSize, status.TotalSize)
-			}
 			status.TotalSize = int64(actualSize)
 			status.CurrentSize = int64(actualSize)
 		}
@@ -192,6 +188,27 @@ func publishVolumeStatus(ctx *volumemgrContext,
 	status *types.VolumeStatus) {
 
 	key := status.Key()
+	if ctx.hvTypeKube {
+		vrStatus := lookupVolumeRefStatus(ctx, key)
+		sub := ctx.pubContentTreeStatus
+		items := sub.GetAll()
+		var reference string
+		for _, item := range items {
+			cts := item.(types.ContentTreeStatus)
+			if status.ContentID.String() == cts.ContentID.String() {
+				log.Tracef("publishVolumeStatus: oci image %s", cts.OciImageName)
+				reference = cts.OciImageName
+				break
+			}
+		}
+		if vrStatus != nil {
+			if vrStatus.ReferenceName != reference {
+				log.Tracef("publishVolumeStatus: sync reference name %s", reference)
+				vrStatus.ReferenceName = reference
+				publishVolumeRefStatus(ctx, vrStatus)
+			}
+		}
+	}
 	log.Tracef("publishVolumeStatus(%s)", key)
 	pub := ctx.pubVolumeStatus
 	pub.Publish(key, *status)

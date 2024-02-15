@@ -17,13 +17,13 @@ import (
 	"github.com/lf-edge/eve/pkg/pillar/base"
 	"github.com/lf-edge/eve/pkg/pillar/cas"
 	"github.com/lf-edge/eve/pkg/pillar/flextimer"
+	"github.com/lf-edge/eve/pkg/pillar/kubeapi"
 	"github.com/lf-edge/eve/pkg/pillar/pidfile"
 	"github.com/lf-edge/eve/pkg/pillar/pubsub"
 	"github.com/lf-edge/eve/pkg/pillar/types"
 	"github.com/lf-edge/eve/pkg/pillar/utils"
 	"github.com/lf-edge/eve/pkg/pillar/vault"
 	"github.com/lf-edge/eve/pkg/pillar/worker"
-	"github.com/lf-edge/eve/pkg/pillar/zfs"
 	"github.com/sirupsen/logrus"
 )
 
@@ -102,6 +102,9 @@ type volumemgrContext struct {
 
 	// cli options
 	versionPtr *bool
+
+	// kube mode
+	hvTypeKube bool
 }
 
 func (ctxPtr *volumemgrContext) lookupVolumeStatusByUUID(id string) *types.VolumeStatus {
@@ -140,6 +143,7 @@ func Run(ps *pubsub.PubSub, loggerArg *logrus.Logger, logArg *base.LogObject, ar
 		deferContentDelete: 0,
 		globalConfig:       types.DefaultConfigItemValueMap(),
 		persistType:        vault.ReadPersistType(),
+		hvTypeKube:         base.IsHVTypeKube(),
 	}
 	agentbase.Init(&ctx, logger, log, agentName,
 		agentbase.WithArguments(arguments))
@@ -237,8 +241,20 @@ func Run(ps *pubsub.PubSub, loggerArg *logrus.Logger, logArg *base.LogObject, ar
 	}
 	log.Functionf("user containerd ready")
 
+	// wait for kubernetes up if in kube mode, if gets error, move on
+	if ctx.hvTypeKube {
+		log.Noticef("volumemgr run: wait for kubernetes")
+		err := kubeapi.WaitForKubernetes(agentName, ps, stillRunning)
+		if err != nil {
+			log.Errorf("volumemgr run: wait for kubernetes error %v", err)
+		} else {
+			log.Noticef("volumemgr run: kubernetes node ready, longhorn ready")
+		}
+
+	}
+
 	if ctx.persistType == types.PersistZFS {
-		if isZvol, _ := zfs.IsDatasetTypeZvol(types.SealedDataset); isZvol {
+		if ctx.hvTypeKube {
 			initializeDirs()
 		} else {
 			// create datasets for volumes
@@ -248,6 +264,12 @@ func Run(ps *pubsub.PubSub, loggerArg *logrus.Logger, logArg *base.LogObject, ar
 			populateExistingVolumesFormatDatasets(&ctx, types.VolumeEncryptedZFSDataset)
 			populateExistingVolumesFormatDatasets(&ctx, types.VolumeClearZFSDataset)
 		}
+
+		// CSI Persist volumes are built on ZFS, check and populate if they exist
+		if ctx.hvTypeKube {
+			populateExistingVolumesFormatPVC(&ctx)
+		}
+
 	} else {
 		// create the directories
 		initializeDirs()
@@ -690,9 +712,16 @@ func Run(ps *pubsub.PubSub, loggerArg *logrus.Logger, logArg *base.LogObject, ar
 // gcUnusedInitObjects this method will garbage collect all unused resource during init
 func gcUnusedInitObjects(ctx *volumemgrContext) {
 	log.Functionf("gcUnusedInitObjects")
-	gcBlobStatus(ctx)
-	gcVerifyImageConfig(ctx)
-	gcImagesFromCAS(ctx)
+
+	// TODO: Need to handle GC for kubevirt eve
+	// There are images and blobs downloaded by kubernetes and eve is not aware of those
+	// We use same containerd repository to store those images.
+	// so for now block GC until we find a proper solution
+	if !ctx.hvTypeKube {
+		gcBlobStatus(ctx)
+		gcVerifyImageConfig(ctx)
+		gcImagesFromCAS(ctx)
+	}
 }
 
 func handleVerifierRestarted(ctxArg interface{}, restartCounter int) {

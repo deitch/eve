@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	zconfig "github.com/lf-edge/eve-api/go/config"
+	"github.com/lf-edge/eve/pkg/pillar/kubeapi"
 	"github.com/lf-edge/eve/pkg/pillar/types"
 	"github.com/lf-edge/eve/pkg/pillar/volumehandlers"
 	"github.com/lf-edge/eve/pkg/pillar/zfs"
@@ -38,7 +39,6 @@ func populateExistingVolumesFormatObjects(_ *volumemgrContext, dirName string) {
 			log.Error(err)
 			continue
 		}
-		log.Noticef("populateExistingVolumesFormatObjects: saving format %s for volume %s", tempStatus.ContentFormat, tempStatus.Key())
 		volumeFormat[tempStatus.Key()] = tempStatus.ContentFormat
 	}
 	log.Functionf("populateExistingVolumesFormatObjects(%s) Done", dirName)
@@ -64,6 +64,28 @@ func populateExistingVolumesFormatDatasets(_ *volumemgrContext, dataset string) 
 		volumeFormat[tempStatus.Key()] = tempStatus.ContentFormat
 	}
 	log.Functionf("populateExistingVolumesFormatDatasets(%s) Done", dataset)
+}
+
+// populateExistingVolumesFormatPVC iterates over the namespace and takes format
+// from the name of the volume/PVC and prepares map of it
+func populateExistingVolumesFormatPVC(_ *volumemgrContext) {
+
+	log.Functionf("populateExistingVolumesFormatPVC")
+	pvlist, err := kubeapi.GetPVCList(log)
+	if err != nil {
+		log.Errorf("populateExistingVolumesFormatPVC: GetPVCList failed: %v", err)
+		return
+	}
+	for _, pvcName := range pvlist {
+		tempStatus, err := getVolumeStatusByPVC(pvcName)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		volumeFormat[tempStatus.Key()] = tempStatus.ContentFormat
+	}
+	log.Functionf("populateExistingVolumesFormatPVC Done")
+
 }
 
 // Periodic garbage collection looking at RefCount=0 files in the unknown
@@ -117,6 +139,38 @@ func gcVolumes(ctx *volumemgrContext, locations []string) {
 	}
 }
 
+func getVolumeStatusByPVC(pvcName string) (*types.VolumeStatus, error) {
+	var encrypted bool
+	var parsedFormat int32
+	var volumeIDAndGeneration string
+
+	volumeIDAndGeneration = pvcName
+	parsedFormat = int32(zconfig.Format_PVC)
+
+	generation := strings.Split(volumeIDAndGeneration, "-pvc-")
+	volUUID, err := uuid.FromString(generation[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse VolumeID: %s", err)
+	}
+	if len(generation) == 1 {
+		return nil, fmt.Errorf("cannot extract generation from PVC %s", pvcName)
+	}
+	// we cannot extract LocalGenerationCounter from the PVC name
+	// assume it is zero
+	generationCounter, err := strconv.ParseInt(generation[1], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse GenerationCounter: %s", err)
+	}
+	vs := types.VolumeStatus{
+		VolumeID:          volUUID,
+		Encrypted:         encrypted,
+		GenerationCounter: generationCounter,
+		ContentFormat:     zconfig.Format(parsedFormat),
+		FileLocation:      pvcName,
+	}
+	return &vs, nil
+}
+
 func getVolumeStatusByLocation(location string) (*types.VolumeStatus, error) {
 	var encrypted bool
 	var parsedFormat int32
@@ -135,13 +189,10 @@ func getVolumeStatusByLocation(location string) (*types.VolumeStatus, error) {
 		}
 		volumeIDAndGeneration = keyAndFormat[0]
 		ok := false
-		log.Noticef("getVolumeStatusByLocation: parsing format from location %s", location)
-		log.Noticef("getVolumeStatusByLocation: found format %s", keyAndFormat[1])
 		parsedFormat, ok = zconfig.Format_value[strings.ToUpper(keyAndFormat[1])]
 		if !ok {
 			return nil, fmt.Errorf("found unknown format volume %s", location)
 		}
-		log.Noticef("getVolumeStatusByLocation: the format as digit %d", parsedFormat)
 		volumeIDAndGeneration = strings.ReplaceAll(volumeIDAndGeneration, "#", ".")
 	}
 
@@ -166,7 +217,6 @@ func getVolumeStatusByLocation(location string) (*types.VolumeStatus, error) {
 		ContentFormat:     zconfig.Format(parsedFormat),
 		FileLocation:      location,
 	}
-	log.Noticef("getVolumeStatusByLocation: found volume %s, content format %s", location, vs.ContentFormat)
 	return &vs, nil
 }
 

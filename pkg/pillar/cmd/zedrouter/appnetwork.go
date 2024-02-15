@@ -88,13 +88,14 @@ func (z *zedrouter) prepareConfigForVIFs(config types.AppNetworkConfig,
 		adapterStatus.Bridge = netInstStatus.BridgeName
 		adapterStatus.BridgeMac = netInstStatus.BridgeMac
 		adapterStatus.BridgeIPAddr = netInstStatus.BridgeIPAddr
+		adapterStatus.HostName = config.Key()
 		if adapterStatus.AppMacAddr != nil {
 			// User-configured static MAC address.
 			adapterStatus.Mac = adapterStatus.AppMacAddr
 		} else {
-			adapterStatus.Mac = z.generateAppMac(adapterNum, status, netInstStatus)
+			adapterStatus.Mac = z.generateAppMac(config.UUIDandVersion.UUID, adapterNum,
+				status.AppNum, netInstStatus)
 		}
-		adapterStatus.HostName = config.Key()
 		guestIP, err := z.lookupOrAllocateIPv4ForVIF(
 			netInstStatus, *adapterStatus, status.UUIDandVersion.UUID)
 		if err != nil {
@@ -110,6 +111,7 @@ func (z *zedrouter) prepareConfigForVIFs(config types.AppNetworkConfig,
 			VIFNum:         adapterNum,
 			GuestIfMAC:     adapterStatus.Mac,
 			GuestIP:        guestIP,
+			PodVIF:         adapterStatus.PodVif,
 		})
 	}
 	return vifs, nil
@@ -125,8 +127,8 @@ func (z *zedrouter) doActivateAppNetwork(config types.AppNetworkConfig,
 
 	// Use NIReconciler to configure connection between the app and the network instance(s)
 	// inside the network stack.
-	appConnRecStatus, err := z.niReconciler.ConnectApp(
-		z.runCtx, config, status.AppNum, vifs)
+	appConnRecStatus, err := z.niReconciler.AddAppConn(
+		z.runCtx, config, status.AppNum, status.AppPod, vifs)
 	if err != nil {
 		err = fmt.Errorf("failed to activate application network: %v", err)
 		z.log.Errorf("doActivateAppNetwork(%v/%v): %v",
@@ -286,8 +288,8 @@ func (z *zedrouter) doUpdateActivatedAppNetwork(oldConfig, newConfig types.AppNe
 	}
 
 	// Update configuration inside the network stack.
-	appConnRecStatus, err := z.niReconciler.ReconnectApp(
-		z.runCtx, newConfig, vifs)
+	appConnRecStatus, err := z.niReconciler.UpdateAppConn(
+		z.runCtx, newConfig, status.AppPod, vifs)
 	if err != nil {
 		err = fmt.Errorf("failed to update activated app network: %v", err)
 		z.log.Errorf("doUpdateActivatedAppNetwork(%v/%v): %v",
@@ -317,7 +319,7 @@ func (z *zedrouter) doInactivateAppNetwork(config types.AppNetworkConfig,
 
 	// Use NIReconciler to un-configure connection between the app and the network instance(s)
 	// inside the network stack.
-	appConnRecStatus, err := z.niReconciler.DisconnectApp(z.runCtx, config.UUIDandVersion.UUID)
+	appConnRecStatus, err := z.niReconciler.DelAppConn(z.runCtx, config.UUIDandVersion.UUID)
 	if err != nil {
 		err = fmt.Errorf("failed to deactivate application network: %v", err)
 		z.log.Errorf("doInactivateAppNetwork(%v/%v): %v",
