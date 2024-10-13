@@ -465,7 +465,6 @@ check-docker-hashes-consistency: $(DOCKERFILE_FROM_CHECKER)
 		-i pkg/bsp-imx/Dockerfile \
 		-i pkg/vtpm/Dockerfile \
 		-i pkg/optee-os/Dockerfile \
-		-i pkg/installer/Dockerfile \
 		-i pkg/wwan/Dockerfile \
 		-i pkg/wlan/Dockerfile \
 		-i pkg/watchdog/Dockerfile \
